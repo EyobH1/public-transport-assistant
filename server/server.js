@@ -3,6 +3,8 @@ console.log('🚀 Starting Public Transport Assistant Backend...\n');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const app = express();
@@ -10,6 +12,28 @@ const app = express();
 // Basic middleware
 app.use(cors());
 app.use(express.json());
+
+const authenticate = (req, res, next) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret');
+    req.user = decoded;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+const authorize = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    next();
+  };
+};
 
 // MongoDB connection
 // SIMPLE MONGODB CONNECTION FOR MONGOOSE 7+
@@ -57,12 +81,27 @@ const routeSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+userSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  this.password = await bcrypt.hash(this.password, 10);
+  next();
+});
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 const Route = mongoose.models.Route || mongoose.model('Route', routeSchema);
 
 // Routes
 const authRouter = express.Router();
 const routeRouter = express.Router();
+
+// Protect routes
+routeRouter.get('/protected-route', authenticate, async (req, res) => {
+  res.json({ message: 'Protected data', user: req.user });
+});
+
+// Admin-only route
+routeRouter.get('/admin-only', authenticate, authorize('admin'), async (req, res) => {
+  res.json({ message: 'Admin data' });
+});
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -155,6 +194,37 @@ authRouter.post('/register', async (req, res) => {
       error: 'Registration failed',
       details: error.message 
     });
+  }
+});
+authRouter.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    const user = await User.findOne({ email });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    const token = jwt.sign(
+      { userId: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET || 'fallback-secret',
+      { expiresIn: '7d' }
+    );
+    
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Login failed' });
   }
 });
 
