@@ -2,36 +2,82 @@ import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import './MapView.css';
 
-// Fix for default icons in Leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
-  iconUrl: require('leaflet/dist/images/marker-icon.png'),
-  shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
+// Fix for default icons in Leaflet - Using ES module imports
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+import iconRetina from 'leaflet/dist/images/marker-icon-2x.png';
+
+// Create default icon
+const DefaultIcon = L.icon({
+  iconRetinaUrl: iconRetina,
+  iconUrl: icon,
+  shadowUrl: iconShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  tooltipAnchor: [16, -28],
+  shadowSize: [41, 41]
 });
 
-// Custom icons
-const busIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/984/984173.png',
+L.Marker.prototype.options.icon = DefaultIcon;
+
+// Custom icons - Use local assets or inline SVG
+const busIcon = L.divIcon({
+  html: `<div style="
+    background-color: #10b981;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  ">🚌</div>`,
   iconSize: [30, 30],
-  iconAnchor: [15, 30],
-  popupAnchor: [0, -30]
+  iconAnchor: [15, 15],
+  popupAnchor: [0, -15]
 });
 
-const trainIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/984/984172.png',
+const trainIcon = L.divIcon({
+  html: `<div style="
+    background-color: #ef4444;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  ">🚆</div>`,
   iconSize: [30, 30],
-  iconAnchor: [15, 30],
-  popupAnchor: [0, -30]
+  iconAnchor: [15, 15],
+  popupAnchor: [0, -15]
 });
 
-const tramIcon = new L.Icon({
-  iconUrl: 'https://cdn-icons-png.flaticon.com/512/984/984174.png',
+const tramIcon = L.divIcon({
+  html: `<div style="
+    background-color: #8b5cf6;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  ">🚋</div>`,
   iconSize: [30, 30],
-  iconAnchor: [15, 30],
-  popupAnchor: [0, -30]
+  iconAnchor: [15, 15],
+  popupAnchor: [0, -15]
 });
 
 const MapView = () => {

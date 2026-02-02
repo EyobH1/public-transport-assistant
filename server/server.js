@@ -405,6 +405,289 @@ routeRouter.get('/:id', async (req, res) => {
   }
 });
 
+// Add this schema after the routeSchema
+const delayReportSchema = new mongoose.Schema({
+  routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  routeNumber: String,
+  routeName: String,
+  stopName: String,
+  delayMinutes: { type: Number, required: true },
+  severity: { 
+    type: String, 
+    enum: ['low', 'medium', 'high'], 
+    default: 'medium' 
+  },
+  description: String,
+  location: {
+    lat: Number,
+    lng: Number
+  },
+  upvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  status: { 
+    type: String, 
+    enum: ['pending', 'verified', 'resolved', 'false_report'], 
+    default: 'pending' 
+  },
+  verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  verifiedAt: Date,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const DelayReport = mongoose.models.DelayReport || mongoose.model('DelayReport', delayReportSchema);
+
+// Add favorite route schema
+const favoriteRouteSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
+  addedAt: { type: Date, default: Date.now },
+  note: String
+});
+
+const FavoriteRoute = mongoose.models.FavoriteRoute || mongoose.model('FavoriteRoute', favoriteRouteSchema);
+
+// Add trip history schema
+const tripHistorySchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
+  routeNumber: String,
+  routeName: String,
+  startStop: String,
+  endStop: String,
+  scheduledTime: Date,
+  actualTime: Date,
+  duration: Number,
+  status: { 
+    type: String, 
+    enum: ['planned', 'in_progress', 'completed', 'cancelled'] 
+  },
+  delayMinutes: Number,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const TripHistory = mongoose.models.TripHistory || mongoose.model('TripHistory', tripHistorySchema);
+
+// Create routers for delays and favorites
+const delayRouter = express.Router();
+const favoriteRouter = express.Router();
+
+// Delay Report Routes
+delayRouter.post('/report', async (req, res) => {
+  try {
+    const { routeId, routeNumber, routeName, stopName, delayMinutes, severity, description, location } = req.body;
+    const userId = req.headers.userid || 'anonymous'; // In production, get from JWT
+
+    if (!routeId || !delayMinutes) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Route ID and delay minutes are required' 
+      });
+    }
+
+    const report = await DelayReport.create({
+      routeId,
+      userId,
+      routeNumber,
+      routeName,
+      stopName,
+      delayMinutes: parseInt(delayMinutes),
+      severity: severity || 'medium',
+      description,
+      location,
+      status: 'pending'
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Delay reported successfully',
+      report
+    });
+  } catch (error) {
+    console.error('Report delay error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to report delay',
+      details: error.message 
+    });
+  }
+});
+
+delayRouter.get('/', async (req, res) => {
+  try {
+    const { routeId, limit = 50, status } = req.query;
+    let query = {};
+    
+    if (routeId) query.routeId = routeId;
+    if (status) query.status = status;
+    
+    const reports = await DelayReport.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .populate('routeId', 'routeNumber name transportType')
+      .populate('userId', 'firstName lastName email');
+    
+    res.json({
+      success: true,
+      count: reports.length,
+      reports
+    });
+  } catch (error) {
+    console.error('Get delay reports error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch delay reports',
+      details: error.message 
+    });
+  }
+});
+
+delayRouter.put('/:id/upvote', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User ID required' 
+      });
+    }
+
+    const report = await DelayReport.findById(id);
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        error: 'Report not found'
+      });
+    }
+
+    // Check if user already upvoted
+    const alreadyUpvoted = report.upvotes.includes(userId);
+    
+    if (alreadyUpvoted) {
+      // Remove upvote
+      report.upvotes = report.upvotes.filter(vote => vote.toString() !== userId);
+    } else {
+      // Add upvote
+      report.upvotes.push(userId);
+    }
+
+    await report.save();
+
+    res.json({
+      success: true,
+      message: alreadyUpvoted ? 'Upvote removed' : 'Upvoted successfully',
+      upvotes: report.upvotes.length
+    });
+  } catch (error) {
+    console.error('Upvote error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to update upvote',
+      details: error.message 
+    });
+  }
+});
+
+// Favorite Routes
+favoriteRouter.post('/', async (req, res) => {
+  try {
+    const { userId, routeId, note } = req.body;
+
+    if (!userId || !routeId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User ID and Route ID are required' 
+      });
+    }
+
+    // Check if already favorited
+    const existing = await FavoriteRoute.findOne({ userId, routeId });
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        error: 'Route already in favorites'
+      });
+    }
+
+    const favorite = await FavoriteRoute.create({
+      userId,
+      routeId,
+      note
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Route added to favorites',
+      favorite
+    });
+  } catch (error) {
+    console.error('Add favorite error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to add to favorites',
+      details: error.message 
+    });
+  }
+});
+
+favoriteRouter.get('/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const favorites = await FavoriteRoute.find({ userId })
+      .populate('routeId')
+      .sort({ addedAt: -1 });
+    
+    res.json({
+      success: true,
+      count: favorites.length,
+      favorites
+    });
+  } catch (error) {
+    console.error('Get favorites error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch favorites',
+      details: error.message 
+    });
+  }
+});
+
+favoriteRouter.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    const favorite = await FavoriteRoute.findOne({ _id: id, userId });
+    
+    if (!favorite) {
+      return res.status(404).json({
+        success: false,
+        error: 'Favorite not found'
+      });
+    }
+
+    await favorite.deleteOne();
+
+    res.json({
+      success: true,
+      message: 'Route removed from favorites'
+    });
+  } catch (error) {
+    console.error('Remove favorite error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to remove from favorites',
+      details: error.message 
+    });
+  }
+});
+
+// Mount the new routers
+app.use('/api/delays', delayRouter);
+app.use('/api/favorites', favoriteRouter);
+
 // Mount routers
 app.use('/api/auth', authRouter);
 app.use('/api/routes', routeRouter);
