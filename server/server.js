@@ -81,11 +81,6 @@ const routeSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
-  this.password = await bcrypt.hash(this.password, 10);
-  next();
-});
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 const Route = mongoose.models.Route || mongoose.model('Route', routeSchema);
 
@@ -142,6 +137,7 @@ app.get('/', (req, res) => {
 // Auth routes
 authRouter.post('/register', async (req, res) => {
   try {
+    console.log('📝 REGISTER REQUEST:', req.body);
     const { email, password, firstName, lastName } = req.body;
     
     if (!email || !password || !firstName || !lastName) {
@@ -162,19 +158,35 @@ authRouter.post('/register', async (req, res) => {
     // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      console.log('⚠️ User already exists:', email);
       return res.status(400).json({
         success: false,
         error: 'User already exists'
       });
     }
+
+    // HASH THE PASSWORD - CRITICAL STEP
+    console.log('🔐 Hashing password...');
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    console.log('✅ Password hashed. Length:', hashedPassword.length);
+    console.log('Hash starts with:', hashedPassword.substring(0, 10));
     
     // Create user
     const user = await User.create({
       email,
-      password, // Note: In production, hash this!
+      password : hashedPassword,
       firstName,
       lastName
     });
+
+    console.log('✅ User created:', user.email);
+
+    const token = jwt.sign(
+      { userId: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET || 'transport-secret-key',
+      { expiresIn: '7d' }
+    );
     
     res.status(201).json({
       success: true,
@@ -198,22 +210,56 @@ authRouter.post('/register', async (req, res) => {
 });
 authRouter.post('/login', async (req, res) => {
   try {
+    console.log('🔑 LOGIN ATTEMPT:', req.body.email)
     const { email, password } = req.body;
-    
+    if (!email || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email and password required' 
+      });
+    }
     const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    console.log('📋 User found:', user ? 'Yes' : 'No');
+    if (!user) {
+      console.log('❌ No user found with email:', email);
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
+    }
+    console.log('🔍 DEBUG INFO:');
+    console.log('  User email:', user.email);
+    console.log('  Stored password length:', user.password?.length || 0);
+    console.log('  Looks like bcrypt hash:', user.password?.startsWith('$2b$') || false);
+
+    console.log('🔐 Comparing password...');
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    console.log('✅ Password valid:', isPasswordValid);
     
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!isPasswordValid) {
+      console.log('❌ Password comparison failed');
+      
+      // Additional debug: try to hash input and compare manually
+      const testHash = await bcrypt.hash(password, 10);
+      console.log('  Input hashed would be:', testHash.substring(0, 30) + '...');
+      console.log('  Stored hash is:', user.password?.substring(0, 30) + '...');
+      
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
+    }
     
     const token = jwt.sign(
       { userId: user._id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'fallback-secret',
+      process.env.JWT_SECRET || 'transport-secret-key',
       { expiresIn: '7d' }
     );
+    console.log('🎉 Login successful for:', user.email);
     
     res.json({
       success: true,
+      message: 'Login successful',
       token,
       user: {
         id: user._id,
@@ -224,7 +270,12 @@ authRouter.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ error: 'Login failed' });
+    console.error('🚨 Login error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Login failed', 
+      details: error.message 
+    });
   }
 });
 

@@ -80,6 +80,7 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  max-width: 100%; 
 }
 
 html {
@@ -362,7 +363,7 @@ body {
   text-align: center;
 }
 
-/* ===== FOOTER STYLES ===== */
+
 .footer {
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-light);
@@ -2817,4 +2818,7 @@ body {
   color: var(--text-secondary);
   margin-bottom: var(--space-xl);
   max-width: 400px;
+}
+.app{
+  overflow: hidden;
 }
